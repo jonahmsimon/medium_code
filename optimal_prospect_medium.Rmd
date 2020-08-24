@@ -1,0 +1,462 @@
+---
+title: "Creating the Optimal Starting Pitching Prospect"
+author: "Jonah Simon"
+date: "8/21/2020"
+output: html_document
+---
+
+## Load Packaages
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(data.table)
+library(tidyverse)
+library(Lahman)
+library(Hmisc)
+library(randomForest)
+library(corrplot)
+library(corrr)
+library(ggthemes)
+library(stringr)
+```
+
+## Load Data
+```{r}
+setwd('/Users/jonahmsimon/R Workspace/Leisure/Medium/Article 5')
+savant <- fread('savant_prospect_up.csv')
+data(People)
+```
+
+## Biographical Data Selection from Lahman
+```{r}
+bio <- subset(People, select=c(playerID, nameFirst, nameLast, weight, height, throws, debut, finalGame))
+
+lahman <- bio %>%
+  rename(
+    last_name = nameLast, 
+    first_name = nameFirst
+  )
+```
+
+## Data Merging and Consolidation Engineering
+```{r}
+# Years in League
+lahman$debut <- as.Date(lahman$debut)
+lahman$finalGame <- as.Date(lahman$finalGame)
+lahman$league_years <- lahman$finalGame-lahman$debut
+lahman$league_years <- as.numeric(lahman$league_years)
+lahman$league_years <- round(lahman$league_years/365,0)
+
+#Frame Merging
+dat <- merge(lahman, savant, by = c('last_name', 'first_name'))
+dat <- subset(dat, select = -c(debut, finalGame))
+dat <- as.data.table(dat)
+
+#Averages for All Seasons
+dat <- dat[,'AV_K_Perc':= round(mean(p_k_percent),2), by = playerID]
+dat <- dat[,'AV_xBA':= round(mean(xba),2), by = playerID]
+dat <- dat[,'AV_EV':= round(mean(exit_velocity_avg),2), by = playerID]
+dat <- dat[,'Total_Innings':= round(sum(p_formatted_ip),2), by = playerID]
+
+#FF
+dat <- dat[,'AV_FF_THROWN_PERC':= round(mean(n_ff_formatted),2), by = playerID]
+dat <- dat[,'AV_FF_Velo':= round(mean(ff_avg_speed),2), by = playerID]
+dat <- dat[,'AV_FF_Spin':= round(mean(ff_avg_spin),2), by = playerID]
+dat <- dat[,'AV_FF_BreakX':= round(mean(ff_avg_break_x),2), by = playerID]
+dat <- dat[,'AV_FF_BreakZ':= round(mean(ff_avg_break_z),2), by = playerID]
+dat <- dat[,'AV_FF_Break_Tot':= round(mean(ff_avg_break),2), by = playerID]
+
+#SL
+dat <- dat[,'AV_SL_THROWN_PERC':= round(mean(n_sl_formatted),2), by = playerID]
+dat <- dat[,'AV_SL_Velo':= round(mean(sl_avg_speed),2), by = playerID]
+dat <- dat[,'AV_SL_Spin':= round(mean(sl_avg_spin),2), by = playerID]
+dat <- dat[,'AV_SL_BreakX':= round(mean(sl_avg_break_x),2), by = playerID]
+dat <- dat[,'AV_SL_BreakZ':= round(mean(sl_avg_break_z),2), by = playerID]
+dat <- dat[,'AV_SL_Break_Tot':= round(mean(sl_avg_break),2), by = playerID]
+
+#CH
+dat <- dat[,'AV_CH_THROWN_PERC':= round(mean(n_ch_formatted),2), by = playerID]
+dat <- dat[,'AV_CH_Velo':= round(mean(ch_avg_speed),2), by = playerID]
+dat <- dat[,'AV_CH_Spin':= round(mean(ch_avg_spin),2), by = playerID]
+dat <- dat[,'AV_CH_BreakX':= round(mean(ch_avg_break_x),2), by = playerID]
+dat <- dat[,'AV_CH_BreakZ':= round(mean(ch_avg_break_z),2), by = playerID]
+dat <- dat[,'AV_CH_Break_Tot':= round(mean(ch_avg_break),2), by = playerID]
+
+#CB
+dat <- dat[,'AV_CB_THROWN_PERC':= round(mean(n_cukc_formatted),2), by = playerID]
+dat <- dat[,'AV_CB_Velo':= round(mean(cu_avg_speed),2), by = playerID]
+dat <- dat[,'AV_CB_Spin':= round(mean(cu_avg_spin),2), by = playerID]
+dat <- dat[,'AV_CB_BreakX':= round(mean(cu_avg_break_x),2), by = playerID]
+dat <- dat[,'AV_CB_BreakZ':= round(mean(cu_avg_break_z),2), by = playerID]
+dat <- dat[,'AV_CB_Break_Tot':= round(mean(cu_avg_break),2), by = playerID]
+
+#SI
+dat <- dat[,'AV_SI_THROWN_PERC':= round(mean(n_sift_formatted),2), by = playerID]
+dat <- dat[,'AV_SI_Velo':= round(mean(si_avg_speed),2), by = playerID]
+dat <- dat[,'AV_SI_Spin':= round(mean(si_avg_spin),2), by = playerID]
+dat <- dat[,'AV_SI_BreakX':= round(mean(si_avg_break_x),2), by = playerID]
+dat <- dat[,'AV_SI_BreakZ':= round(mean(si_avg_break_z),2), by = playerID]
+dat <- dat[,'AV_SI_Break_Tot':= round(mean(si_avg_break),2), by = playerID]
+
+#FC - Cutter
+dat <- dat[,'AV_FC_THROWN_PERC':= round(mean(n_fc_formatted),2), by = playerID]
+dat <- dat[,'AV_FC_Velo':= round(mean(fc_avg_speed),2), by = playerID]
+dat <- dat[,'AV_FC_Spin':= round(mean(fc_avg_spin),2), by = playerID]
+dat <- dat[,'AV_FC_BreakX':= round(mean(fc_avg_break_x),2), by = playerID]
+dat <- dat[,'AV_FC_BreakZ':= round(mean(fc_avg_break_z),2), by = playerID]
+dat <- dat[,'AV_FC_Break_Tot':= round(mean(fc_avg_break),2), by = playerID]
+
+#FS - Spliiter
+dat <- dat[,'AV_FS_THROWN_PERC':= round(mean(n_fs_formatted),2), by = playerID]
+dat <- dat[,'AV_FS_Velo':= round(mean(fs_avg_speed),2), by = playerID]
+dat <- dat[,'AV_FS_Spin':= round(mean(fs_avg_spin),2), by = playerID]
+dat <- dat[,'AV_FS_BreakX':= round(mean(fs_avg_break_x),2), by = playerID]
+dat <- dat[,'AV_FS_BreakZ':= round(mean(fs_avg_break_z),2), by = playerID]
+dat <- dat[,'AV_FS_Break_Tot':= round(mean(fs_avg_break),2), by = playerID]
+
+#Select Variables
+dat <- subset(dat, select = c(last_name, first_name, weight, height, throws, league_years, AV_K_Perc, AV_xBA, AV_EV, Total_Innings, AV_FF_THROWN_PERC, AV_FF_Velo, AV_FF_Spin, AV_FF_BreakX, AV_FF_BreakZ, AV_FF_Break_Tot, AV_SL_THROWN_PERC, AV_SL_Velo, AV_SL_Spin, AV_SL_BreakX, AV_SL_BreakZ, AV_SL_Break_Tot,AV_CH_THROWN_PERC, AV_CH_Velo, AV_CH_Spin, AV_CH_BreakX, AV_CH_BreakZ, AV_CH_Break_Tot,AV_CB_THROWN_PERC, AV_CB_Velo, AV_CB_Spin, AV_CB_BreakX, AV_CB_BreakZ, AV_CB_Break_Tot,AV_SI_THROWN_PERC, AV_SI_Velo, AV_SI_Spin, AV_SI_BreakX, AV_SI_BreakZ, AV_SI_Break_Tot,AV_FC_THROWN_PERC, AV_FC_Velo, AV_FC_Spin, AV_FC_BreakX, AV_FC_BreakZ, AV_FC_Break_Tot))
+
+#Remove Duplicates
+dat <- unique(dat)
+```
+
+## Feature Engineering with Binary Variables
+```{r}
+#Create Success Metric
+dat$success <- ifelse((dat$AV_K_Perc >= 22) & (dat$AV_xBA <= .240) & (dat$AV_EV <= 88) & (dat$Total_Innings >= 80), 1, 0)
+dat[success == 1, ]
+
+gg.success <- ggplot(data=dat, aes(x=as.factor(success), fill = throws)) + geom_histogram(stat='count') + scale_fill_economist(name = 'Throw Hand', breaks = c('L','R')) + ggtitle('Success Metric Distribution') + labs(x='Non-Success vs. Success'); gg.success
+
+# Create binary metric for each pitch thrown
+dat$throws_FF <- ifelse(dat$AV_FF_Velo > 0.1,1,0)
+dat$throws_SL <- ifelse(dat$AV_SL_Velo > 0.1,1,0)
+dat$throws_CH <- ifelse(dat$AV_CH_Velo > 0.1,1,0)
+dat$throws_CB <- ifelse(dat$AV_CB_Velo > 0.1,1,0)
+dat$throws_SI <- ifelse(dat$AV_SI_Velo > 0.1,1,0)
+dat$throws_FC <- ifelse(dat$AV_FC_Velo > 0.1,1,0)
+dat$throws_left <- ifelse(dat$throws == 'L', 1, 0)
+dat$throws_right <- ifelse(dat$throws == 'R', 1, 0)
+
+# Use cut2 to quantile variables
+#Bio
+dat$weight_quants <- cut2(dat$weight, c(145, 175, 200, 225))
+dat$height_quants <- cut2(dat$height, c(67, 71, 74, 78))
+
+gg.hw <- ggplot(data = subset(dat, !is.na(height_quants)), aes(x=weight_quants, fill = height_quants)) + geom_histogram(stat='count') + scale_fill_economist(name = 'Height Groups', breaks = c('[67,71)','[71,74)','[74,78)','[78,82]')) + ggtitle('Height/Weight Distribution') + labs(x='Weight Quantiles'); gg.hw
+
+#FF
+dat$ff_thrown_perc_quants <- cut2(dat$AV_FF_THROWN_PERC, c(27, 50, 60, 70))
+dat$ff_velo_quants <- cut2(dat$AV_FF_Velo, c(90, 93, 95, 97))
+dat$ff_spin_quants <- cut2(dat$AV_FF_Spin, c(1000, 2000, 2300, 2500))
+dat$ff_breakx_quants <- cut2(dat$AV_FF_BreakX, c(-20, -8, 8, 10))
+dat$ff_breakz_quants <- cut2(dat$AV_FF_BreakZ, c(-20, -15,-11, -8))
+dat$ff_break_tot_quants <- cut2(dat$AV_FF_Break_Tot, c(6, 15, 20, 30))
+
+#SL
+dat$sl_thrown_perc_quants <- cut2(dat$AV_SL_THROWN_PERC, c(15, 25, 35, 50))
+dat$sl_velo_quants <- cut2(dat$AV_SL_Velo, c(80, 83, 87, 95))
+dat$sl_spin_quants <- cut2(dat$AV_SL_Spin, c(1700, 2100, 2300, 2700))
+datssl_breakx_quants <- cut2(dat$AV_SL_BreakX, c(-20, -5, 10, 20))
+dat$sl_breakz_quants <- cut2(dat$AV_SL_BreakZ, c(-60, -40, -30, -15))
+dat$sl_break_tot_quants <- cut2(dat$AV_SL_Break_Tot, c(1, 5, 10, 20))
+
+#CH
+dat$ch_thrown_perc_quants <- cut2(dat$AV_CH_THROWN_PERC, c(10, 20, 30, 60))
+dat$ch_velo_quants <- cut2(dat$AV_CH_Velo, c(80, 82, 84, 86))
+dat$ch_spin_quants <- cut2(dat$AV_CH_Spin, c(1500, 1700, 2000, 2250))
+dat$ch_breakx_quants <- cut2(dat$AV_CH_BreakX, c(-20, -10, -5, 15))
+dat$ch_breakz_quants <- cut2(dat$AV_CH_BreakZ, c(-60, -40, -30, -25))
+dat$ch_break_tot_quants <- cut2(dat$AV_CH_Break_Tot, c(15, 18, 21, 26))
+
+#CB
+dat$cb_thrown_perc_quants <- cut2(dat$AV_CB_THROWN_PERC, c(10, 15, 20, 300))
+dat$cb_velo_quants <- cut2(dat$AV_CB_Velo, c(75, 77, 79, 80))
+dat$cb_spin_quants <- cut2(dat$AV_CB_Spin, c(1100, 2100, 2400, 2700))
+dat$cb_breakx_quants <- cut2(dat$AV_CB_BreakX, c(-20, -5, 5, 15))
+dat$cb_breakz_quants <- cut2(dat$AV_CB_BreakZ, c(-80, -60, -40, -20))
+dat$cb_break_tot_quants <- cut2(dat$AV_CB_Break_Tot, c(5, 10, 13, 28))
+
+#SI
+dat$si_thrown_perc_quants <- cut2(dat$AV_SI_THROWN_PERC, c(15, 25, 30, 35))
+dat$si_velo_quants <- cut2(dat$AV_SI_Velo, c(90, 93, 95, 97))
+dat$si_spin_quants <- cut2(dat$AV_SI_Spin, c(1000, 2100, 2300, 2400))
+dat$si_breakx_quants <- cut2(dat$AV_SI_BreakX, c(-20, -10, 10, 15))
+dat$si_breakz_quants <- cut2(dat$AV_SI_BreakZ, c(-30, -23, -20, -16))
+dat$si_break_tot_quants <- cut2(dat$AV_SI_Break_Tot, c(6, 15, 20, 30))
+
+#FC
+dat$fc_thrown_perc_quants <- cut2(dat$AV_FC_THROWN_PERC, c(15, 25, 30, 35))
+dat$fc_velo_quants <- cut2(dat$AV_FC_Velo, c(75, 83, 87, 90))
+dat$fc_spin_quants <- cut2(dat$AV_FC_Spin, c(1000, 2000, 2100, 2300))
+dat$fc_breakx_quants <- cut2(dat$AV_FC_BreakX, c(-10, 0, 3, 5))
+dat$fc_breakz_quants <- cut2(dat$AV_FC_BreakZ, c(-30, -25, -20, -10))
+dat$fc_break_tot_quants <- cut2(dat$AV_FC_Break_Tot, c(6, 10, 12, 15))
+summary(dat)
+
+# Create binary metric for quantiled variables
+dat$weight_quants
+
+#Height
+dat$height_67_70 <- as.factor(ifelse(dat$height_quants == '[67,71)', 1, 0))
+dat$height_71_73 <- as.factor(ifelse(dat$height_quants == '[71,74)', 1, 0))
+dat$height_74_77 <- as.factor(ifelse(dat$height_quants == '[74,78)', 1, 0))
+dat$height_78_plus <- as.factor(ifelse(dat$height_quants == '[78,82]', 1, 0))
+
+#Weight
+dat$weight_140_174 <- as.factor(ifelse(dat$weight_quants == '[145,175)', 1, 0))
+dat$weight_175_199 <- as.factor(ifelse(dat$weight_quants == '[175,200)', 1, 0))
+dat$weight_200_224 <- as.factor(ifelse(dat$weight_quants == '[200,225)', 1, 0))
+dat$weight_225_plus <- as.factor(ifelse(dat$weight_quants == '[225,315]', 1, 0))
+
+#FF
+dat$ff_thrown_0_27<- as.factor(ifelse(dat$ff_thrown_perc_quants == '[ 0.0,27.0)', 1, 0))
+dat$ff_thrown_27_49<- as.factor(ifelse(dat$ff_thrown_perc_quants == '[27.0,50.0)', 1, 0))
+dat$ff_thrown_50_59<- as.factor(ifelse(dat$ff_thrown_perc_quants == '[50.0,60.0)', 1, 0))
+dat$ff_thrown_60_69<- as.factor(ifelse(dat$ff_thrown_perc_quants == '[60.0,70.0)', 1, 0))
+dat$ff_thrown_70_plus<- as.factor(ifelse(dat$ff_thrown_perc_quants == '[70.0,87.2]', 1, 0))
+
+dat$ff_velo_80_89 <- as.factor(ifelse(dat$ff_velo_quants == '[ 80.6, 90.0)',1,0))
+dat$ff_velo_90_92 <- as.factor(ifelse(dat$ff_velo_quants == '[ 90.0, 93.0)',1,0))
+dat$ff_velo_93_94 <- as.factor(ifelse(dat$ff_velo_quants == '[ 93.0, 95.0)',1,0))
+dat$ff_velo_95_96 <- as.factor(ifelse(dat$ff_velo_quants == '[ 95.0, 97.0)',1,0))
+dat$ff_velo_97_plus <- as.factor(ifelse(dat$ff_velo_quants == '[ 97.0,100.9]',1,0))
+
+dat$ff_spin_quants_1000_1999 <- as.factor(ifelse(dat$ff_spin_quants == '[1000,2000)', 1, 0))
+dat$ff_spin_quants_2000_2299 <- as.factor(ifelse(dat$ff_spin_quants == '[2000,2300)', 1, 0))
+dat$ff_spin_quants_2300_2499 <- as.factor(ifelse(dat$ff_spin_quants == '[2300,2500)', 1, 0))
+dat$ff_spin_quants_2500_plus <- as.factor(ifelse(dat$ff_spin_quants == '[2500,2758]', 1, 0))
+
+dat$ff_breakx_neg20_neg9 <- as.factor(ifelse(dat$ff_breakx_quants == '[-20.0, -8.0)',1,0))
+dat$ff_breakx_neg8_pos7 <- as.factor(ifelse(dat$ff_breakx_quants == '[ -8.0,  8.0)',1,0))
+dat$ff_breakx_pos8_pos9 <- as.factor(ifelse(dat$ff_breakx_quants == '[  8.0, 10.0)',1,0))
+dat$ff_breakx_10_plus <- as.factor(ifelse(dat$ff_breakx_quants == '[ 10.0, 17.6]',1,0))
+
+dat$ff_breakz_neg38_neg21 <- as.factor(ifelse(dat$ff_breakz_quants == '[-37.6,-20.0)', 1, 0))
+dat$ff_breakz_neg20_neg16 <- as.factor(ifelse(dat$ff_breakz_quants == '[-20.0,-15.0)', 1, 0))
+dat$ff_breakz_neg15_neg12 <- as.factor(ifelse(dat$ff_breakz_quants == '[-15.0,-11.0)', 1, 0))
+dat$ff_breakz_neg11_less <- as.factor(ifelse(dat$ff_breakz_quants == '[-11.0, -8.0]', 1, 0))
+
+dat$ff_break_tot_6_14 <- as.factor(ifelse(dat$ff_break_tot_quants == '[ 6,15)', 1,0))
+dat$ff_break_tot_15_19 <- as.factor(ifelse(dat$ff_break_tot_quants == '[15,20)', 1,0))
+dat$ff_break_tot_20_plus <- as.factor(ifelse(dat$ff_break_tot_quants == '[20,30]', 1,0))
+
+#SL
+dat$sl_thrown_0_14<- as.factor(ifelse(dat$sl_thrown_perc_quants == '[ 0.4,15.0)', 1, 0))
+dat$sl_thrown_15_24<- as.factor(ifelse(dat$sl_thrown_perc_quants == '[15.0,25.0)', 1, 0))
+dat$sl_thrown_25_34<- as.factor(ifelse(dat$sl_thrown_perc_quants == '[25.0,35.0)', 1, 0))
+dat$sl_thrown_35_49<- as.factor(ifelse(dat$sl_thrown_perc_quants == '[35.0,50.0)', 1, 0))
+dat$sl_thrown_50_plus<- as.factor(ifelse(dat$sl_thrown_perc_quants == '[50.0,74.7]', 1, 0))
+
+dat$sl_velo_70_79 <- as.factor(ifelse(dat$sl_velo_quants == '[70,80)',1,0))
+dat$sl_velo_80_82 <- as.factor(ifelse(dat$sl_velo_quants == '[80,83)',1,0))
+dat$sl_velo_83_86 <- as.factor(ifelse(dat$sl_velo_quants == '[83,87)',1,0))
+dat$sl_velo_87_plus <- as.factor(ifelse(dat$sl_velo_quants == '[87,95]',1,0))
+
+dat$sl_spin_quants_1000_1699 <- as.factor(ifelse(dat$sl_spin_quants == '[1112,1700)', 1, 0))
+dat$sl_spin_quants_1700_2099 <- as.factor(ifelse(dat$sl_spin_quants == '[1700,2100)', 1, 0))
+dat$sl_spin_quants_2100_2299 <- as.factor(ifelse(dat$sl_spin_quants == '[2100,2300)', 1, 0))
+dat$sl_spin_quants_2300_2699 <- as.factor(ifelse(dat$sl_spin_quants == '[2300,2700)', 1, 0))
+dat$sl_spin_quants_2700_plus <- as.factor(ifelse(dat$sl_spin_quants == '[2700,3141]', 1, 0))
+
+dat$sl_breakz_neg60_neg41 <- as.factor(ifelse(dat$sl_breakz_quants == '[-60,-40)', 1, 0))
+dat$sl_breakz_neg40_neg31 <- as.factor(ifelse(dat$sl_breakz_quants == '[-40,-30)', 1, 0))
+dat$sl_breakz_neg30_neg15 <- as.factor(ifelse(dat$sl_breakz_quants == '[-30,-15]', 1, 0))
+
+dat$sl_break_tot_1_4 <- as.factor(ifelse(dat$sl_break_tot_quants == '[ 1, 5)', 1,0))
+dat$sl_break_tot_5_9 <- as.factor(ifelse(dat$sl_break_tot_quants == '[ 5,10)', 1,0))
+dat$sl_break_tot_10_plus <- as.factor(ifelse(dat$sl_break_tot_quants == '[10,20]', 1,0))
+
+#CH
+dat$ch_thrown_0_9<- as.factor(ifelse(dat$ch_thrown_perc_quants == '[ 0.1,10.0)', 1, 0))
+dat$ch_thrown_10_19<- as.factor(ifelse(dat$ch_thrown_perc_quants == '[10.0,20.0)', 1, 0))
+dat$ch_thrown_20_29<- as.factor(ifelse(dat$ch_thrown_perc_quants == '[20.0,30.0)', 1, 0))
+dat$ch_thrown_30_plus<- as.factor(ifelse(dat$ch_thrown_perc_quants == '[30.0,60.0]', 1, 0))
+levels(dat$ch_spin_quants)
+dat$ch_velo_66_79 <- as.factor(ifelse(dat$ch_velo_quants == '[66.3,80.0)',1,0))
+dat$ch_velo_80_81 <- as.factor(ifelse(dat$ch_velo_quants == '[80.0,82.0)',1,0))
+dat$ch_velo_82_83 <- as.factor(ifelse(dat$ch_velo_quants == '[82.0,84.0)',1,0))
+dat$ch_velo_84_85 <- as.factor(ifelse(dat$ch_velo_quants == '[84.0,86.0)',1,0))
+dat$ch_velo_85_plus <- as.factor(ifelse(dat$ch_velo_quants == '[86.0,91.6]',1,0))
+
+dat$ch_spin_quants_800_1499 <- as.factor(ifelse(dat$ch_spin_quants == '[ 867,1500)', 1, 0))
+dat$ch_spin_quants_1500_1699 <- as.factor(ifelse(dat$ch_spin_quants == '[1500,1700)', 1, 0))
+dat$ch_spin_quants_1700_1999 <- as.factor(ifelse(dat$ch_spin_quants == '[1700,2000)', 1, 0))
+dat$ch_spin_quants_2000_2249 <- as.factor(ifelse(dat$ch_spin_quants == '[2000,2250)', 1, 0))
+dat$ch_spin_quants_2250_plus <- as.factor(ifelse(dat$ch_spin_quants == '[2250,2418]', 1, 0))
+
+dat$ch_breakx_neg20_neg11 <- as.factor(ifelse(dat$ch_breakx_quants == '[-20.0,-10.0)', 1, 0))
+dat$ch_breakx_neg10_neg6 <- as.factor(ifelse(dat$ch_breakx_quants == '[-10.0, -5.0)', 1, 0))
+dat$ch_breakx_neg5_pos14 <- as.factor(ifelse(dat$ch_breakx_quants == '[ -5.0, 15.0)', 1, 0))
+dat$ch_breakx_pos15_plus5 <- as.factor(ifelse(dat$ch_breakx_quants == '[ 15.0, 19.4]', 1, 0))
+
+dat$ch_breakz_neg60_neg41 <- as.factor(ifelse(dat$ch_breakz_quants == '[-60.0,-40.0)', 1, 0))
+dat$ch_breakz_neg40_neg31 <- as.factor(ifelse(dat$ch_breakz_quants == '[-40.0,-30.0)', 1, 0))
+dat$ch_breakz_neg30_neg26 <- as.factor(ifelse(dat$ch_breakz_quants == '[-30.0,-25.0)', 1, 0))
+dat$ch_breakz_neg25_plus <- as.factor(ifelse(dat$ch_breakz_quants == '[-25.0,-12.3]', 1, 0))
+
+dat$ch_break_tot_4_14 <- as.factor(ifelse(dat$ch_break_tot_quants == '[ 4.73,15.00)', 1,0))
+dat$ch_break_tot_15_17 <- as.factor(ifelse(dat$ch_break_tot_quants == '[15.00,18.00)', 1,0))
+dat$ch_break_tot_18_20 <- as.factor(ifelse(dat$ch_break_tot_quants == '[18.00,21.00)', 1,0))
+dat$ch_break_tot_21_plus <- as.factor(ifelse(dat$ch_break_tot_quants == '[21.00,26.00]', 1,0))
+
+#CB
+dat$cb_thrown_0_9<- as.factor(ifelse(dat$cb_thrown_perc_quants == '[  0.2, 10.0)', 1, 0))
+dat$cb_thrown_10_14<- as.factor(ifelse(dat$cb_thrown_perc_quants == '[ 10.0, 15.0)', 1, 0))
+dat$cb_thrown_15_19<- as.factor(ifelse(dat$cb_thrown_perc_quants == '[ 15.0, 20.0)', 1, 0))
+dat$cb_thrown_20_plus<- as.factor(ifelse(dat$cb_thrown_perc_quants == '[ 20.0,300.0]', 1, 0))
+
+dat$cb_velo_60_74 <- as.factor(ifelse(dat$cb_velo_quants == '[59.4,75.0)',1,0))
+dat$cb_velo_75_76 <- as.factor(ifelse(dat$cb_velo_quants == '[75.0,77.0)',1,0))
+dat$cb_velo_77_78 <- as.factor(ifelse(dat$cb_velo_quants == '[77.0,79.0)',1,0))
+dat$cb_velo_79_80 <- as.factor(ifelse(dat$cb_velo_quants == '[79.0,80.0)',1,0))
+dat$cb_velo_81_plus <- as.factor(ifelse(dat$cb_velo_quants == '[80.0,87.2]',1,0))
+
+dat$cb_spin_quants_1000_2099 <- as.factor(ifelse(dat$cb_spin_quants == '[1100,2100)', 1, 0))
+dat$cb_spin_quants_2100_2399 <- as.factor(ifelse(dat$cb_spin_quants == '[2100,2400)', 1, 0))
+dat$cb_spin_quants_2400_2699 <- as.factor(ifelse(dat$cb_spin_quants == '[2400,2700)', 1, 0))
+dat$cb_spin_quants_2700_plus <- as.factor(ifelse(dat$cb_spin_quants == '[2700,3249]', 1, 0))
+
+dat$cb_breakx_neg20_neg6 <- as.factor(ifelse(dat$cb_breakx_quants == '[-20.0, -5.0)', 1, 0))
+dat$cb_breakx_neg5_pos4 <- as.factor(ifelse(dat$cb_breakx_quants == '[ -5.0,  5.0)', 1, 0))
+dat$cb_breakx_pos5_pos14 <- as.factor(ifelse(dat$cb_breakx_quants == '[  5.0, 15.0)', 1, 0))
+dat$cb_breakx_pos14_plus <- as.factor(ifelse(dat$cb_breakx_quants == '[ 15.0, 19.5]', 1, 0))
+
+dat$cb_breakz_neg80_neg61 <- as.factor(ifelse(dat$cb_breakz_quants == '[-80,-60)', 1, 0))
+dat$cb_breakz_neg60_neg41 <- as.factor(ifelse(dat$cb_breakz_quants == '[-60,-40)', 1, 0))
+dat$cb_breakz_neg40_plus <- as.factor(ifelse(dat$cb_breakz_quants == '[-40,-20]', 1, 0))
+
+dat$cb_break_tot_0_4<- as.factor(ifelse(dat$cb_break_tot_quants == '[ 3.2, 5.0)', 1, 0))
+dat$cb_break_tot__5_9<- as.factor(ifelse(dat$cb_break_tot_quants == '[ 5.0,10.0)', 1, 0))
+dat$cb_braek_tot_10_12<- as.factor(ifelse(dat$cb_break_tot_quants == '[10.0,13.0)', 1, 0))
+dat$cb_break_tot_13_plus<- as.factor(ifelse(dat$cb_break_tot_quants == '[13.0,28.0]', 1, 0))
+
+#SI
+dat$si_thrown_0_14<- as.factor(ifelse(dat$si_thrown_perc_quants == '[ 0.0,15.0)', 1, 0))
+dat$si_thrown_15_24<- as.factor(ifelse(dat$si_thrown_perc_quants == '[15.0,25.0)', 1, 0))
+dat$si_thrown_25_29<- as.factor(ifelse(dat$si_thrown_perc_quants == '[25.0,30.0)', 1, 0))
+dat$si_thrown_30_34<- as.factor(ifelse(dat$si_thrown_perc_quants == '[30.0,35.0)', 1, 0))
+dat$si_thrown_35_plus<- as.factor(ifelse(dat$si_thrown_perc_quants == '[35.0,88.2]', 1, 0))
+
+dat$si_velo_77_89 <- as.factor(ifelse(dat$si_velo_quants == '[ 78.9, 90.0)',1,0))
+dat$si_velo_90_92 <- as.factor(ifelse(dat$si_velo_quants == '[ 90.0, 93.0)',1,0))
+dat$si_velo_93_94 <- as.factor(ifelse(dat$si_velo_quants == '[ 93.0, 95.0)',1,0))
+dat$si_velo_95_96 <- as.factor(ifelse(dat$si_velo_quants == '[ 95.0, 97.0)',1,0))
+dat$si_velo_97_plus <- as.factor(ifelse(dat$si_velo_quants == '[ 97.0,100.8]',1,0))
+
+dat$si_spin_quants_1000_2099 <- as.factor(ifelse(dat$si_spin_quants == '[1000,2100)', 1, 0))
+dat$si_spin_quants_2100_2299 <- as.factor(ifelse(dat$si_spin_quants == '[2100,2300)', 1, 0))
+dat$si_spin_quants_2300_2399 <- as.factor(ifelse(dat$si_spin_quants == '[2300,2400)', 1, 0))
+dat$si_spin_quants_2400_plus <- as.factor(ifelse(dat$si_spin_quants == '[2400,2786]', 1, 0))
+
+dat$si_breakx_neg20_neg11 <- as.factor(ifelse(dat$si_breakx_quants == '[-20.0,-10.0)', 1, 0))
+dat$si_breakx_neg10_pos9 <- as.factor(ifelse(dat$si_breakx_quants == '[-10.0, 10.0)', 1, 0))
+dat$si_breakx_pos10_pos14 <- as.factor(ifelse(dat$si_breakx_quants == '[ 10.0, 15.0)', 1, 0))
+dat$si_breakx_pos15_plus <- as.factor(ifelse(dat$si_breakx_quants == '[ 15.0, 20.2]', 1, 0))
+
+dat$si_breakz_neg50_neg31 <- as.factor(ifelse(dat$si_breakz_quants == '[-50.0,-30.0)', 1, 0))
+dat$si_breakz_neg30_neg24 <- as.factor(ifelse(dat$si_breakz_quants == '[-30.0,-23.0)', 1, 0))
+dat$si_breakz_neg23_neg21 <- as.factor(ifelse(dat$si_breakz_quants == '[-23.0,-20.0)', 1, 0))
+dat$si_breakz_neg20_neg17 <- as.factor(ifelse(dat$si_breakz_quants == '[-20.0,-16.0)', 1, 0))
+dat$si_breakz_neg17_plus <- as.factor(ifelse(dat$si_breakz_quants == '[-16.0, -9.1]', 1, 0))
+
+dat$si_break_tot_6_14 <- as.factor(ifelse(dat$si_break_tot_quants == '[ 6,15)', 1,0))
+dat$si_break_tot_15_19 <- as.factor(ifelse(dat$si_break_tot_quants == '[15,20)', 1,0))
+dat$si_break_tot_20_plus <- as.factor(ifelse(dat$si_break_tot_quants == '[20,30]', 1,0))
+
+#FC
+levels(dat$fc_break_tot_quants)
+dat$fc_thrown_0_14<- as.factor(ifelse(dat$fc_thrown_perc_quants == '[ 0.35,15.00)', 1, 0))
+dat$fc_thrown_15_24<- as.factor(ifelse(dat$fc_thrown_perc_quants == '[15.00,25.00)', 1, 0))
+dat$fc_thrown_25_29<- as.factor(ifelse(dat$fc_thrown_perc_quants == '[25.00,30.00)', 1, 0))
+dat$fc_thrown_30_34<- as.factor(ifelse(dat$fc_thrown_perc_quants == '[30.00,35.00)', 1, 0))
+dat$fc_thrown_35_plus<- as.factor(ifelse(dat$fc_thrown_perc_quants == '[35.00,77.53]', 1, 0))
+
+dat$fc_velo_75_82 <- as.factor(ifelse(dat$fc_velo_quants == '[75.0,83.0)',1,0))
+dat$fc_velo_83_86 <- as.factor(ifelse(dat$fc_velo_quants == '[83.0,87.0)',1,0))
+dat$fc_velo_87_89 <- as.factor(ifelse(dat$fc_velo_quants == '[87.0,90.0)',1,0))
+dat$fc_velo_90_plus <- as.factor(ifelse(dat$fc_velo_quants == '[90.0,94.9]',1,0))
+
+dat$fc_spin_quants_1000_1999 <- as.factor(ifelse(dat$fc_spin_quants == '[1000,2000)', 1, 0))
+dat$fc_spin_quants_2000_2099 <- as.factor(ifelse(dat$fc_spin_quants == '[2000,2100)', 1, 0))
+dat$fc_spin_quants_2100_2299 <- as.factor(ifelse(dat$fc_spin_quants == '[2100,2300)', 1, 0))
+dat$fc_spin_quants_2300_plus <- as.factor(ifelse(dat$fc_spin_quants == '[2300,2838]', 1, 0))
+
+dat$fc_breakx_neg10_neg1 <- as.factor(ifelse(dat$fc_breakx_quants == '[-10.0,  0.0)', 1, 0))
+dat$fc_breakx_0_pos2 <- as.factor(ifelse(dat$fc_breakx_quants == '[  0.0,  3.0)', 1, 0))
+dat$fc_breakx_pos3_pos4 <- as.factor(ifelse(dat$fc_breakx_quants == '[  3.0,  5.0)', 1, 0))
+dat$fc_breakx_pos5_plus <- as.factor(ifelse(dat$fc_breakx_quants == '[  5.0, 12.8]', 1, 0))
+
+dat$fc_breakz_neg41_neg31 <- as.factor(ifelse(dat$fc_breakz_quants == '[-40.4,-30.0)', 1, 0))
+dat$fc_breakz_neg30_neg26 <- as.factor(ifelse(dat$fc_breakz_quants == '[-30.0,-25.0)', 1, 0))
+dat$fc_breakz_neg25_neg21 <- as.factor(ifelse(dat$fc_breakz_quants == '[-25.0,-20.0)', 1, 0))
+dat$fc_breakz_neg21_plus <- as.factor(ifelse(dat$fc_breakz_quants == '[-20.0,-10.0]', 1, 0))
+
+dat$fc_break_tot_4_5 <- as.factor(ifelse(dat$fc_break_tot_quants == '[ 4.0, 6.0)', 1,0))
+dat$fc_break_tot_6_9 <- as.factor(ifelse(dat$fc_break_tot_quants == '[ 6.0,10.0)', 1,0))
+dat$fc_break_tot_10_11 <- as.factor(ifelse(dat$fc_break_tot_quants == '[10.0,12.0)', 1,0))
+dat$fc_break_tot_12_14 <- as.factor(ifelse(dat$fc_break_tot_quants == '[12.0,15.0)', 1,0))
+dat$fc_break_tot_15_plus <- as.factor(ifelse(dat$fc_break_tot_quants == '[15.0,20.4]', 1,0))
+
+gg.velspin <- ggplot(data = subset(dat,!is.na(ff_velo_quants)), aes(x=ff_velo_quants, fill = ff_spin_quants)) + geom_histogram(stat='count') + scale_fill_economist(name = 'Spin Groups') + ggtitle('FF Velo/Spin Distribution') + labs(x='Velocity Quantiles'); gg.velspin
+
+summary(dat)
+```
+
+
+## Use Feature Importance to Create Arsenals 
+```{r}
+# Most Important Pitches
+pitch.dat <- dat[,.(success, throws_FF, throws_SL, throws_CH, throws_CB, throws_SI, throws_FC)]
+
+pitch.dat[is.na(pitch.dat)] <- 0
+
+pitch.rf <- randomForest(success~.,data = pitch.dat)
+pitch.varImp <- varImpPlot(pitch.rf); pitch.varImp
+
+pitch.corplot <- corrplot(cor(pitch.dat),method='square'); pitch.corplot
+
+# Aresenal 1 (Best) - FF, CB, CH
+ff.cb.ch.ars <- dat[throws_FF == 1 & throws_CB == 1 & throws_CH == 1,.(last_name, first_name, throws_left, throws_right, success, height_67_70, height_71_73, height_74_77, height_78_plus, weight_140_174, weight_175_199, weight_200_224, weight_225_plus, ff_thrown_0_27, ff_thrown_27_49, ff_thrown_50_59, ff_thrown_60_69, ff_thrown_70_plus, ff_velo_80_89, ff_velo_90_92, ff_velo_93_94, ff_velo_95_96, ff_velo_97_plus, ff_spin_quants_1000_1999, ff_spin_quants_2000_2299, ff_spin_quants_2300_2499, ff_spin_quants_2500_plus,ff_breakx_neg20_neg9, ff_breakx_neg8_pos7, ff_breakx_pos8_pos9, ff_breakx_10_plus, ff_breakz_neg38_neg21, ff_breakz_neg20_neg16, ff_breakz_neg15_neg12, ff_breakz_neg11_less, ff_break_tot_6_14, ff_break_tot_15_19, ff_break_tot_20_plus, cb_thrown_0_9, cb_thrown_10_14, cb_thrown_15_19, cb_thrown_20_plus, cb_velo_60_74, cb_velo_75_76, cb_velo_77_78, cb_velo_79_80, cb_velo_81_plus, cb_spin_quants_1000_2099, cb_spin_quants_2100_2399, cb_spin_quants_2400_2699, cb_spin_quants_2700_plus, cb_breakx_neg20_neg6, cb_breakx_neg5_pos4, cb_breakx_pos5_pos14, cb_breakx_pos14_plus, cb_breakz_neg80_neg61, cb_breakz_neg60_neg41, cb_breakz_neg40_plus, cb_break_tot_0_4, cb_break_tot__5_9, cb_break_tot_13_plus, ch_thrown_0_9, ch_thrown_10_19, ch_thrown_20_29, ch_thrown_30_plus, ch_velo_66_79, ch_velo_80_81, ch_velo_82_83, ch_velo_84_85, ch_velo_85_plus, ch_spin_quants_800_1499, ch_spin_quants_1500_1699, ch_spin_quants_1700_1999, ch_spin_quants_2000_2249, ch_spin_quants_2250_plus, ch_breakx_neg20_neg11, ch_breakx_neg10_neg6, ch_breakx_neg5_pos14, ch_breakx_pos15_plus5, ch_breakz_neg60_neg41, ch_breakz_neg40_neg31, ch_breakz_neg30_neg26, ch_breakz_neg25_plus, ch_break_tot_4_14, ch_break_tot_15_17, ch_break_tot_18_20, ch_break_tot_21_plus)]
+ff.cb.ch.ars$last_name <- as.factor(ff.cb.ch.ars$last_name)
+ff.cb.ch.ars$first_name <- as.factor(ff.cb.ch.ars$first_name)
+```
+
+
+```{r}
+# Arsenal 2 - FF, CB, CH, SL
+ff.cb.ch.sl.ars <- dat[throws_FF == 1 & throws_CB == 1 & throws_CH == 1 & throws_SL == 1,.(last_name, first_name, throws_left, throws_right, success, height_67_70, height_71_73, height_74_77, height_78_plus, weight_140_174, weight_175_199, weight_200_224, weight_225_plus, ff_thrown_0_27, ff_thrown_27_49, ff_thrown_50_59, ff_thrown_60_69, ff_thrown_70_plus, ff_velo_80_89, ff_velo_90_92, ff_velo_93_94, ff_velo_95_96, ff_velo_97_plus, ff_spin_quants_1000_1999, ff_spin_quants_2000_2299, ff_spin_quants_2300_2499, ff_spin_quants_2500_plus,ff_breakx_neg20_neg9, ff_breakx_neg8_pos7, ff_breakx_pos8_pos9, ff_breakx_10_plus, ff_breakz_neg38_neg21, ff_breakz_neg20_neg16, ff_breakz_neg15_neg12, ff_breakz_neg11_less, ff_break_tot_6_14, ff_break_tot_15_19, ff_break_tot_20_plus, cb_thrown_0_9, cb_thrown_10_14, cb_thrown_15_19, cb_thrown_20_plus, cb_velo_60_74, cb_velo_75_76, cb_velo_77_78, cb_velo_79_80, cb_velo_81_plus, cb_spin_quants_1000_2099, cb_spin_quants_2100_2399, cb_spin_quants_2400_2699, cb_spin_quants_2700_plus, cb_breakx_neg20_neg6, cb_breakx_neg5_pos4, cb_breakx_pos5_pos14, cb_breakx_pos14_plus, cb_breakz_neg80_neg61, cb_breakz_neg60_neg41, cb_breakz_neg40_plus, cb_break_tot_0_4, cb_break_tot__5_9, cb_break_tot_13_plus, ch_thrown_0_9, ch_thrown_10_19, ch_thrown_20_29, ch_thrown_30_plus, ch_velo_66_79, ch_velo_80_81, ch_velo_82_83, ch_velo_84_85, ch_velo_85_plus, ch_spin_quants_800_1499, ch_spin_quants_1500_1699, ch_spin_quants_1700_1999, ch_spin_quants_2000_2249, ch_spin_quants_2250_plus, ch_breakx_neg20_neg11, ch_breakx_neg10_neg6, ch_breakx_neg5_pos14, ch_breakx_pos15_plus5, ch_breakz_neg60_neg41, ch_breakz_neg40_neg31, ch_breakz_neg30_neg26, ch_breakz_neg25_plus, ch_break_tot_4_14, ch_break_tot_15_17, ch_break_tot_18_20, ch_break_tot_21_plus, sl_thrown_0_14, sl_thrown_15_24, sl_thrown_25_34, sl_thrown_35_49, sl_thrown_50_plus, sl_velo_70_79, sl_velo_80_82, sl_velo_83_86, sl_velo_87_plus, sl_spin_quants_1000_1699, sl_spin_quants_1700_2099, sl_spin_quants_2100_2299, sl_spin_quants_2300_2699, sl_spin_quants_2700_plus, sl_breakz_neg60_neg41, sl_breakz_neg40_neg31, sl_breakz_neg30_neg15, sl_break_tot_1_4, sl_break_tot_5_9, sl_break_tot_10_plus)]
+ff.cb.ch.sl.ars$last_name <- as.factor(ff.cb.ch.sl.ars$last_name)
+ff.cb.ch.sl.ars$first_name <- as.factor(ff.cb.ch.sl.ars$first_name)
+
+# Arsenal 3 - FF, CH, SL
+ff.ch.sl.ars <- dat[throws_FF == 1 & throws_CH == 1 & throws_SL == 1,.(last_name, first_name, throws_left, throws_right, success, height_67_70, height_71_73, height_74_77, height_78_plus, weight_140_174, weight_175_199, weight_200_224, weight_225_plus, ff_thrown_0_27, ff_thrown_27_49, ff_thrown_50_59, ff_thrown_60_69, ff_thrown_70_plus, ff_velo_80_89, ff_velo_90_92, ff_velo_93_94, ff_velo_95_96, ff_velo_97_plus, ff_spin_quants_1000_1999, ff_spin_quants_2000_2299, ff_spin_quants_2300_2499, ff_spin_quants_2500_plus,ff_breakx_neg20_neg9, ff_breakx_neg8_pos7, ff_breakx_pos8_pos9, ff_breakx_10_plus, ff_breakz_neg38_neg21, ff_breakz_neg20_neg16, ff_breakz_neg15_neg12, ff_breakz_neg11_less, ff_break_tot_6_14, ff_break_tot_15_19, ff_break_tot_20_plus, ch_thrown_0_9, ch_thrown_10_19, ch_thrown_20_29, ch_thrown_30_plus, ch_velo_66_79, ch_velo_80_81, ch_velo_82_83, ch_velo_84_85, ch_velo_85_plus, ch_spin_quants_800_1499, ch_spin_quants_1500_1699, ch_spin_quants_1700_1999, ch_spin_quants_2000_2249, ch_spin_quants_2250_plus, ch_breakx_neg20_neg11, ch_breakx_neg10_neg6, ch_breakx_neg5_pos14, ch_breakx_pos15_plus5, ch_breakz_neg60_neg41, ch_breakz_neg40_neg31, ch_breakz_neg30_neg26, ch_breakz_neg25_plus, ch_break_tot_4_14, ch_break_tot_15_17, ch_break_tot_18_20, ch_break_tot_21_plus, sl_thrown_0_14, sl_thrown_15_24, sl_thrown_25_34, sl_thrown_35_49, sl_thrown_50_plus, sl_velo_70_79, sl_velo_80_82, sl_velo_83_86, sl_velo_87_plus, sl_spin_quants_1000_1699, sl_spin_quants_1700_2099, sl_spin_quants_2100_2299, sl_spin_quants_2300_2699, sl_spin_quants_2700_plus, sl_breakz_neg60_neg41, sl_breakz_neg40_neg31, sl_breakz_neg30_neg15, sl_break_tot_1_4, sl_break_tot_5_9, sl_break_tot_10_plus)]
+ff.ch.sl.ars$last_name <- as.factor(ff.ch.sl.ars$last_name)
+ff.ch.sl.ars$first_name <- as.factor(ff.ch.sl.ars$first_name)
+```
+
+
+```{r}
+```
+
+## Identify Most Importance Features per Aresenal
+```{r}
+#FF, CH, CB
+rf.1.dat <- subset(ff.cb.ch.ars, select = -c(first_name, last_name))
+rf.1.dat <- rf.1.dat %>%
+   mutate_all(funs(as.numeric(as.factor(.))))
+  
+rf.ars1 <- randomForest(success~.,data = rf.1.dat)
+ars.1.rf.varImp <- varImpPlot(rf.ars1, main =  'Arsenal 1 Important Features'); ars.1.rf.varImp
+ars.1.corr <- rf.1.dat %>% correlate() %>% focus(success)
+
+#FF, CH, CB, SL
+rf.2.dat <- subset(ff.cb.ch.sl.ars, select = -c(first_name, last_name))
+rf.2.dat <- rf.2.dat %>%
+   mutate_all(funs(as.numeric(as.factor(.))))
+  
+rf.ars2 <- randomForest(success~.,data = rf.2.dat)
+ars.2.rf.varImp <- varImpPlot(rf.ars2, main =  'Arsenal 2 Important Features'); ars.2.rf.varImp
+ars.2.corr <- rf.2.dat %>% correlate() %>% focus(success)
+```
+
